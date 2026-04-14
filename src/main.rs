@@ -67,6 +67,21 @@ fn guard(input : String) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn pick(input : String) -> Result<(), Box<dyn std::error::Error>> {
+    let (tool, ver) = input.split_once("@")
+        .ok_or("Invalid format: use 'tool@version'")?;
+
+    let tool_ver_path = format!("{}/.scarecrow/versions/{}/{}", std::env::var("HOME")?, 
+        &tool, &ver);
+    if !fs::exists(&tool_ver_path)? {
+        return Err("Version not installed. Run 'crow guard' to install it first.".into());
+    }
+
+    symlink(tool, ver)?;
+    println!("Switched to {}@{}", tool, ver);
+    Ok(())
+}
+
 fn list_all_ver() -> Result<(), Box<dyn std::error::Error>> {
     let ver_dir = format!("{}/.scarecrow/versions", std::env::var("HOME")?);
     let path = Path::new(&ver_dir);
@@ -118,7 +133,10 @@ match cli.command {
             }
         }
         Commands::Pick { tool_ver } => {
-            println!("🐦‍⬛ Picking environment {}", tool_ver);
+            //println!("🐦‍⬛ Picking environment {}", tool_ver);
+            if let Err(e) = pick(tool_ver) {
+                eprintln!("🐦‍⬛ Error: {}", e);
+            }
         }
         Commands::Scare { tool_ver } => {
             println!("🐦‍⬛ Scaring away {}", tool_ver);
