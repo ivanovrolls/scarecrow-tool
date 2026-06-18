@@ -82,6 +82,29 @@ fn pick(input : String) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn scare(input : String) -> Result<(), Box<dyn std::error::Error>> {
+    let (tool, ver) = input.split_once("@")
+        .ok_or("Invalid format: use 'tool@version'")?;
+
+    let tool_ver_path = format!("{}/.scarecrow/versions/{}/{}", std::env::var("HOME")?, 
+        &tool, &ver);
+    let symlink_path = format!("{}/.scarecrow/bin/{}", std::env::var("HOME")?, tool);
+    if !fs::exists(&tool_ver_path)? {
+        return Err("Version does not exist".into());
+    }
+    let is_active = fs::read_link(&symlink_path)
+        .ok()
+        .map(|target| target.to_string_lossy().contains(ver))
+        .unwrap_or(false);
+    if is_active {
+        return Err("Cannot remove active version. Run 'crow pick' to switch to a different version first.".into());
+    } else {
+        fs::remove_dir_all(tool_ver_path).unwrap();
+        Ok(())
+    }
+
+}
+
 fn list_all_ver() -> Result<(), Box<dyn std::error::Error>> {
     let ver_dir = format!("{}/.scarecrow/versions", std::env::var("HOME")?);
     let path = Path::new(&ver_dir);
@@ -139,7 +162,9 @@ match cli.command {
             }
         }
         Commands::Scare { tool_ver } => {
-            println!("🐦‍⬛ Scaring away {}", tool_ver);
+            if let Err(e) = scare(tool_ver) {
+                eprintln!("🐦‍⬛ Error: {}", e);
+            }
         }
         Commands::All => {
             if let Err(e) = list_all_ver() {
