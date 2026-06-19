@@ -42,28 +42,57 @@ fn symlink(tool : &str, version : &str) -> Result<(), Box<dyn std::error::Error>
     Ok(())
 }
 
+fn tar_install(tar_url : &str, path : &str) -> Result<(), Box<dyn std::error::Error>> {
+
+}
+
 fn guard(input : String) -> Result<(), Box<dyn std::error::Error>> {
+    //download link example: https://nodejs.org/dist/v24.17.0/node-v24.17.0-darwin-arm64.tar.gz
+    //download link structure: https://nodejs.org/dist/v{version}}/node-v{version}-{os}-{arch}.tar.gz  
+
     let (tool, ver) = input.split_once("@")
         .ok_or("Invalid format: use 'tool@version'")?;
     
     let base_path = format!("{}/.scarecrow/versions", std::env::var("HOME")?);
-    let path = Path::new(&base_path);
-    println!("Base path: {}", base_path);
+    let path = Path::new(&base_path); //convert to Path type
+
+    println!("Base path: {}", base_path); 
 
     let tool_dir = path.join(tool);
-    let ver_dir = tool_dir.join(ver);
+    let ver_dir = tool_dir.join(ver); 
 
-    fs::create_dir_all(&ver_dir)?;
+    fs::create_dir_all(&ver_dir)?; //creates the tool directory by joining path, tool name and version
 
-    let bin_dir = ver_dir.join("bin");
+    let bin_dir = ver_dir.join("bin"); //for bin
     fs::create_dir_all(&bin_dir)?;
 
     let bin_path = bin_dir.join(tool);
     fs::write(&bin_path, format!("fake binary for {} {}", tool, ver))?;
 
-    
+    println!("{}", std::env::consts::ARCH);
+    println!("{}", std::env::consts::OS);
+
+    let arch = std::env::consts::ARCH;
+    let os = std::env::consts::OS;
+
+    let os_tarball = match os {
+        "macos" => "darwin",
+        "windows" => "win",
+        "linux" => "linux",
+        _ => "unknown",
+    };
+
+    let arch_tarball = match arch {
+        "aarch64" => "arm64",
+        "x86_64" => "x64",
+        _ => "unknown",
+    };
+
+    let tarball = format!("https://nodejs.org/dist/v{}/node-v{}-{}-{}.tar.gz", ver, ver, os_tarball, arch_tarball);
+
     symlink(&tool,&ver)?;
     println!("Installed {} @ {}", tool, ver);
+
     Ok(())
 }
 
@@ -79,6 +108,7 @@ fn pick(input : String) -> Result<(), Box<dyn std::error::Error>> {
 
     symlink(tool, ver)?;
     println!("Switched to {}@{}", tool, ver);
+    
     Ok(())
 }
 
@@ -99,7 +129,7 @@ fn scare(input : String) -> Result<(), Box<dyn std::error::Error>> {
     if is_active {
         return Err("Cannot remove active version. Run 'crow pick' to switch to a different version first.".into());
     } else {
-        fs::remove_dir_all(tool_ver_path).unwrap();
+        fs::remove_dir_all(&tool_ver_path)?;
         Ok(())
     }
 
