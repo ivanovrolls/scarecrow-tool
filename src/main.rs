@@ -8,7 +8,7 @@ use tar::Archive;
 
 #[derive(Parser)] //automatically generate code to parse command line arguments, Rust writes boilerplate for me :p
 #[command(name = "crow")]
-#[command(about = "Scarecrow is a CLI tool for managing development environments 🐦‍⬛", long_about = None)]
+#[command(about = "scarecrow is a CLI tool for managing development environments 🐦‍⬛", long_about = None)]
 struct Cli { //defines my command line interface, the struct will hold the parsed arguments
     #[command(subcommand)]
     command: Commands,
@@ -16,13 +16,13 @@ struct Cli { //defines my command line interface, the struct will hold the parse
 
 #[derive(Subcommand)] //automatically generate code to parse subcommands
 enum Commands {
-    Guard { //install and switch to env
+    Fetch { //install and switch to env
         tool_ver: String, //ver of tool to use e.g. node 18.16.0
     },
-    Pick { //change env
+    Perch { //change env
         tool_ver: String, //ver of tool to use e.g. node 18.16.0
     },
-    Scare { //remove env
+    Drop { //remove env
         tool_ver: String, //ver of tool to remove e.g. node 18.16.0
     },
     All, //list all envs
@@ -35,7 +35,7 @@ fn symlink(tool : &str, version : &str, os: &str, arch: &str) -> Result<(), Box<
     fs::create_dir_all(&symlink_dir)?; //only created if path does not exist
 
     let symlink_path = Path::new(&symlink_dir).join(tool); //where the symlink file will be
-    let target = format!("../versions/{}/{}/node-v{}-{}-{}/bin/{}", tool, version, version, os, arch, tool); //what the symlink points to
+    let target = format!("../versions/{}/{}/{}-v{}-{}-{}/bin/{}", tool, version, tool, version, os, arch, tool); //what the symlink points to
     
     if symlink_path.exists() { //remove old symlinks
         fs::remove_file(&symlink_path)?;
@@ -67,7 +67,7 @@ fn decomp_install(bytes: &[u8], path: &str, format: &str)-> Result<(), Box<dyn s
     Ok(())
 }
 
-fn guard(input : String) -> Result<(), Box<dyn std::error::Error>> {
+fn fetch(input : String) -> Result<(), Box<dyn std::error::Error>> {
     //download link example: https://nodejs.org/dist/v24.17.0/node-v24.17.0-darwin-arm64.tar.gz
     //download link structure: https://nodejs.org/dist/v{version}}/node-v{version}-{os}-{arch}.tar.gz  
 
@@ -107,32 +107,45 @@ fn guard(input : String) -> Result<(), Box<dyn std::error::Error>> {
     let bytes = download(&tarball)?;
     decomp_install(&bytes, &ver_dir.to_string_lossy(), "tar.gz")?;
 
-    symlink(&tool,&ver, &os, &arch)?;
+    symlink(&tool,&ver, &os_tarball, &arch_tarball)?;
     println!("Installed {} @ {}", tool, ver);
 
     Ok(())
 }
 
-fn pick(input : String) -> Result<(), Box<dyn std::error::Error>> {
+fn perch(input : String) -> Result<(), Box<dyn std::error::Error>> {
     let (tool, ver) = input.split_once("@")
         .ok_or("Invalid format: use 'tool@version'")?;
 
     let tool_ver_path = format!("{}/.scarecrow/versions/{}/{}", std::env::var("HOME")?, 
         &tool, &ver);
     if !fs::exists(&tool_ver_path)? {
-        return Err("Version not installed. Run 'crow guard' to install it first.".into());
+        return Err("Version not installed. Run 'crow fetch' to install it first.".into());
     }
 
     let arch = std::env::consts::ARCH;
     let os = std::env::consts::OS;
 
-    symlink(&tool, &ver, &os, &arch)?;
+    let os_tarball = match os {
+        "macos" => "darwin",
+        "windows" => "win",
+        "linux" => "linux",
+        _ => "unknown",
+    };
+
+    let arch_tarball = match arch {
+        "aarch64" => "arm64",
+        "x86_64" => "x64",
+        _ => "unknown",
+    };
+
+    symlink(&tool, &ver, &os_tarball, &arch_tarball)?;
     println!("Switched to {}@{}", &tool, &ver);
     
     Ok(())
 }
 
-fn scare(input : String) -> Result<(), Box<dyn std::error::Error>> {
+fn crow_drop(input : String) -> Result<(), Box<dyn std::error::Error>> {
     let (tool, ver) = input.split_once("@")
         .ok_or("Invalid format: use 'tool@version'")?;
 
@@ -147,7 +160,7 @@ fn scare(input : String) -> Result<(), Box<dyn std::error::Error>> {
         .map(|target| target.to_string_lossy().contains(ver))
         .unwrap_or(false);
     if is_active {
-        return Err("Cannot remove active version. Run 'crow pick' to switch to a different version first.".into());
+        return Err("Cannot remove active version. Run 'crow perch' to switch to a different version first.".into());
     } else {
         fs::remove_dir_all(&tool_ver_path)?;
         Ok(())
@@ -160,7 +173,7 @@ fn list_all_ver() -> Result<(), Box<dyn std::error::Error>> {
     let path = Path::new(&ver_dir);
 
     if !path.exists() {
-        println!("🐦‍⬛ No versions installed yet. To install a version, run 'crow guard'.");
+        println!("🐦‍⬛ No versions installed yet. To install a version, run 'crow fetch'.");
         return Ok(());
     }
 
@@ -200,19 +213,19 @@ fn list_all_ver() -> Result<(), Box<dyn std::error::Error>> {
 fn main() {
     let cli = Cli::parse();
 match cli.command {
-        Commands::Guard { tool_ver } => {
-            if let Err(e) = guard(tool_ver) {
+        Commands::Fetch { tool_ver } => {
+            if let Err(e) = fetch(tool_ver) {
                 eprintln!("🐦‍⬛ Error: {}", e); 
             }
         }
-        Commands::Pick { tool_ver } => {
-            //println!("🐦‍⬛ Picking environment {}", tool_ver);
-            if let Err(e) = pick(tool_ver) {
+        Commands::Perch { tool_ver } => {
+            //println!("🐦‍⬛ perching environment {}", tool_ver);
+            if let Err(e) = perch(tool_ver) {
                 eprintln!("🐦‍⬛ Error: {}", e);
             }
         }
-        Commands::Scare { tool_ver } => {
-            if let Err(e) = scare(tool_ver) {
+        Commands::Drop { tool_ver } => {
+            if let Err(e) = crow_drop(tool_ver) {
                 eprintln!("🐦‍⬛ Error: {}", e);
             }
         }
