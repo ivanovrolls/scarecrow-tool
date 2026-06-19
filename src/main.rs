@@ -29,14 +29,61 @@ enum Commands {
 }
 
 //helpers
+fn build_url(tool: &str, version: &str, os: &str, arch: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let os_mapped = map_os(tool, os);
+    let arch_mapped = map_arch(tool, arch);
+    
+    match tool {
+        "node" => Ok(format!("https://nodejs.org/dist/v{}/node-v{}-{}-{}.tar.gz", version, version, os_mapped, arch_mapped)),
+        "go" => Ok(format!("https://go.dev/dl/go1.{}.{}-{}.tar.gz", version, os_mapped, arch_mapped)),
+        _ => Err("Unsupported tool".into())
+    }
+}
+
+fn map_os(tool: &str, os: &str) -> &'static str {
+    match tool {
+        "node" => match os {
+            "macos" => "darwin",
+            "windows" => "win",
+            "linux" => "linux",
+            _ => "unknown",
+        },
+        "go" => match os {
+            "macos" => "darwin",
+            "linux" => "linux",
+            _ => "unknown",
+        },
+        _ => "unknown",
+    }
+}
+
+fn map_arch(tool: &str, arch: &str) -> &'static str {
+    match tool {
+        "node" => match arch {
+            "aarch64" => "arm64",
+            "x86_64" => "x64",
+            _ => "unknown",
+        },
+        "go" => match arch {
+            "aarch64" => "arm64",
+            "x86_64" => "amd64",
+            _ => "unknown",
+        },
+        _ => "unknown",
+    }
+}
 fn symlink(tool : &str, version : &str, os: &str, arch: &str) -> Result<(), Box<dyn std::error::Error>> {
     //creating symlink directory, for the tool the user is using scarecrow to install
+    let os_mapped = map_os(tool, os);
+    let arch_mapped = map_arch(tool, arch);
     let symlink_dir = format!("{}/.scarecrow/bin", std::env::var("HOME")?);
     fs::create_dir_all(&symlink_dir)?; //only created if path does not exist
 
     let symlink_path = Path::new(&symlink_dir).join(tool); //where the symlink file will be
-    let target = format!("../versions/{}/{}/{}-v{}-{}-{}/bin/{}", tool, version, tool, version, os, arch, tool); //what the symlink points to
-    
+    let target = match tool {
+        "go" => format!("../versions/{}/{}/go/bin/{}", tool, version, tool),
+        _ => format!("../versions/{}/{}/{}-v{}-{}-{}/bin/{}", tool, version, tool, version, os_mapped, arch_mapped, tool),
+    };  
     if symlink_path.exists() { //remove old symlinks
         fs::remove_file(&symlink_path)?;
     }
@@ -50,6 +97,7 @@ fn download(tar_url: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>>{ //dow
     let res = client.get(tar_url)
         .send()?
         .bytes()?;
+    
     Ok(res.to_vec())
 }
 
@@ -67,6 +115,8 @@ fn decomp_install(bytes: &[u8], path: &str, format: &str)-> Result<(), Box<dyn s
     Ok(())
 }
 
+
+//crow command functions
 fn fetch(input : String) -> Result<(), Box<dyn std::error::Error>> {
     //download link example: https://nodejs.org/dist/v24.17.0/node-v24.17.0-darwin-arm64.tar.gz
     //download link structure: https://nodejs.org/dist/v{version}}/node-v{version}-{os}-{arch}.tar.gz  
@@ -77,38 +127,20 @@ fn fetch(input : String) -> Result<(), Box<dyn std::error::Error>> {
     let base_path = format!("{}/.scarecrow/versions", std::env::var("HOME")?);
     let path = Path::new(&base_path); //convert to Path type
 
-    println!("Base path: {}", base_path); 
-
     let tool_dir = path.join(tool);
     let ver_dir = tool_dir.join(ver); 
 
     fs::create_dir_all(&ver_dir)?; //creates the tool directory by joining path, tool name and version
 
-    println!("{}", std::env::consts::ARCH);
-    println!("{}", std::env::consts::OS);
-
-    let arch = std::env::consts::ARCH;
     let os = std::env::consts::OS;
-
-    let os_tarball = match os {
-        "macos" => "darwin",
-        "windows" => "win",
-        "linux" => "linux",
-        _ => "unknown",
-    };
-
-    let arch_tarball = match arch {
-        "aarch64" => "arm64",
-        "x86_64" => "x64",
-        _ => "unknown",
-    };
-
-    let tarball = format!("https://nodejs.org/dist/v{}/node-v{}-{}-{}.tar.gz", ver, ver, os_tarball, arch_tarball);
+    let arch = std::env::consts::ARCH;
+    
+    let tarball = build_url(tool, ver, os, arch)?;
     let bytes = download(&tarball)?;
     decomp_install(&bytes, &ver_dir.to_string_lossy(), "tar.gz")?;
 
-    symlink(&tool,&ver, &os_tarball, &arch_tarball)?;
-    println!("Installed {} @ {}", tool, ver);
+    symlink(&tool, &ver, os, arch)?;
+    println!("🐦‍⬛ Installed {} @ {}", tool, ver);
 
     Ok(())
 }
@@ -126,20 +158,7 @@ fn perch(input : String) -> Result<(), Box<dyn std::error::Error>> {
     let arch = std::env::consts::ARCH;
     let os = std::env::consts::OS;
 
-    let os_tarball = match os {
-        "macos" => "darwin",
-        "windows" => "win",
-        "linux" => "linux",
-        _ => "unknown",
-    };
-
-    let arch_tarball = match arch {
-        "aarch64" => "arm64",
-        "x86_64" => "x64",
-        _ => "unknown",
-    };
-
-    symlink(&tool, &ver, &os_tarball, &arch_tarball)?;
+    symlink(&tool, &ver, os, arch)?;
     println!("Switched to {}@{}", &tool, &ver);
     
     Ok(())
