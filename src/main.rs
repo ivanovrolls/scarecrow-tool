@@ -2,6 +2,9 @@ use std::fs;
 use std::path::Path;
 use std::os::unix::fs as unix_fs;
 use clap::{Parser, Subcommand};
+use flate2::read::GzDecoder;
+use reqwest;
+use tar::Archive;
 
 #[derive(Parser)] //automatically generate code to parse command line arguments, Rust writes boilerplate for me :p
 #[command(name = "crow")]
@@ -26,13 +29,13 @@ enum Commands {
 }
 
 //helpers
-fn symlink(tool : &str, version : &str) -> Result<(), Box<dyn std::error::Error>> {
+fn symlink(tool : &str, version : &str, os: &str, arch: &str) -> Result<(), Box<dyn std::error::Error>> {
     //creating symlink directory, for the tool the user is using scarecrow to install
     let symlink_dir = format!("{}/.scarecrow/bin", std::env::var("HOME")?);
     fs::create_dir_all(&symlink_dir)?; //only created if path does not exist
 
     let symlink_path = Path::new(&symlink_dir).join(tool); //where the symlink file will be
-    let target = format!("../versions/{}/{}/bin/{}", tool, version, tool); //what the symlink points to
+    let target = format!("../versions/{}/{}/node-v{}-{}-{}/bin/{}", tool, version, version, os, arch, tool); //what the symlink points to
     
     if symlink_path.exists() { //remove old symlinks
         fs::remove_file(&symlink_path)?;
@@ -42,8 +45,26 @@ fn symlink(tool : &str, version : &str) -> Result<(), Box<dyn std::error::Error>
     Ok(())
 }
 
-fn tar_install(tar_url : &str, path : &str) -> Result<(), Box<dyn std::error::Error>> {
+fn download(tar_url: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>>{ //downloads file
+    let client = reqwest::blocking::Client::new();
+    let res = client.get(tar_url)
+        .send()?
+        .bytes()?;
+    Ok(res.to_vec())
+}
 
+fn decomp_install(bytes: &[u8], path: &str, format: &str)-> Result<(), Box<dyn std::error::Error>> {
+   match format {
+        "tar.gz" => {
+            let decoder = GzDecoder::new(bytes.as_ref());
+            let mut archive = Archive::new(decoder);
+            archive.unpack(path)?;
+        }
+        _ => {
+            return Err("Unsupported format".into());
+        }
+    }
+    Ok(())
 }
 
 fn guard(input : String) -> Result<(), Box<dyn std::error::Error>> {
@@ -62,12 +83,6 @@ fn guard(input : String) -> Result<(), Box<dyn std::error::Error>> {
     let ver_dir = tool_dir.join(ver); 
 
     fs::create_dir_all(&ver_dir)?; //creates the tool directory by joining path, tool name and version
-
-    let bin_dir = ver_dir.join("bin"); //for bin
-    fs::create_dir_all(&bin_dir)?;
-
-    let bin_path = bin_dir.join(tool);
-    fs::write(&bin_path, format!("fake binary for {} {}", tool, ver))?;
 
     println!("{}", std::env::consts::ARCH);
     println!("{}", std::env::consts::OS);
@@ -89,8 +104,10 @@ fn guard(input : String) -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let tarball = format!("https://nodejs.org/dist/v{}/node-v{}-{}-{}.tar.gz", ver, ver, os_tarball, arch_tarball);
+    let bytes = download(&tarball)?;
+    decomp_install(&bytes, &ver_dir.to_string_lossy(), "tar.gz")?;
 
-    symlink(&tool,&ver)?;
+    symlink(&tool,&ver, &os, &arch)?;
     println!("Installed {} @ {}", tool, ver);
 
     Ok(())
@@ -106,8 +123,11 @@ fn pick(input : String) -> Result<(), Box<dyn std::error::Error>> {
         return Err("Version not installed. Run 'crow guard' to install it first.".into());
     }
 
-    symlink(tool, ver)?;
-    println!("Switched to {}@{}", tool, ver);
+    let arch = std::env::consts::ARCH;
+    let os = std::env::consts::OS;
+
+    symlink(&tool, &ver, &os, &arch)?;
+    println!("Switched to {}@{}", &tool, &ver);
     
     Ok(())
 }
