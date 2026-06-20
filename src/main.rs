@@ -10,6 +10,7 @@ use tar::Archive;
 use serde::{Deserialize};
 use std::fs::OpenOptions;
 use std::io::Write;
+use sha2;
 
 //bash for shell integration
 const SHELL_HOOK: &str = r#"
