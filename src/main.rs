@@ -35,7 +35,7 @@ fn build_url(tool: &str, version: &str, os: &str, arch: &str) -> Result<String, 
     
     match tool {
         "node" => Ok(format!("https://nodejs.org/dist/v{}/node-v{}-{}-{}.tar.gz", version, version, os_mapped, arch_mapped)),
-        "go" => Ok(format!("https://go.dev/dl/go1.{}.{}-{}.tar.gz", version, os_mapped, arch_mapped)),
+        "go" => Ok(format!("https://go.dev/dl/go{}.{}-{}.tar.gz", version, os_mapped, arch_mapped)),
         _ => Err("Unsupported tool".into())
     }
 }
@@ -92,13 +92,18 @@ fn symlink(tool : &str, version : &str, os: &str, arch: &str) -> Result<(), Box<
     Ok(())
 }
 
-fn download(tar_url: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>>{ //downloads file
+fn download(tar_url: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let client = reqwest::blocking::Client::new();
     let res = client.get(tar_url)
-        .send()?
-        .bytes()?;
+        .send()?;
+
+    println!("{}",tar_url);
     
-    Ok(res.to_vec())
+    if !res.status().is_success() {
+        return Err(format!("Download failed with status: {}", res.status()).into());
+    }
+    
+    Ok(res.bytes()?.to_vec())
 }
 
 fn decomp_install(bytes: &[u8], path: &str, format: &str)-> Result<(), Box<dyn std::error::Error>> {
