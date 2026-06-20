@@ -36,6 +36,10 @@ enum Commands {
     Drop { //remove env
         tool_ver: String, //ver of tool to remove e.g. node 18.16.0
     },
+    Field { //new config file
+        tool_ver: String, //ver of tool to remove e.g. node 18.16.0
+    },
+    Refresh,
     ListAll, //list all envs
     Init, //shell integration hook
     Hook,
@@ -274,6 +278,27 @@ fn crow_drop(input : String) -> Result<(), Box<dyn std::error::Error>> {
 
 }
 
+fn crow_field(input: String) -> Result<(), Box<dyn std::error::Error>> {
+    if !fs::exists(".scarecrow")? {
+        let mut file = File::create(".scarecrow")?;
+        writeln!(file, "{}", input)?;
+    } else {
+        if let Ok(lines) = read_lines(".scarecrow") {
+            for line in lines.map_while(Result::ok) {
+                if input == line {
+                    return Err("Tool already configured.".into());
+                }
+            }
+        }
+        let mut file = OpenOptions::new()
+            .append(true)
+            .open(".scarecrow")?;
+        writeln!(file, "{}", input)?;
+    }
+    println!("🐦‍⬛ Added {} to .scarecrow. Run 'crow refresh' or re-enter the directory to apply.", input);
+    Ok(())
+}
+
 fn list_all_ver() -> Result<(), Box<dyn std::error::Error>> {
     let ver_dir = format!("{}/.scarecrow/versions", std::env::var("HOME")?);
     let path = Path::new(&ver_dir);
@@ -347,7 +372,6 @@ fn hook() -> Result<(), Box<dyn std::error::Error>> {
     }
     Ok(())
 }
-
 fn main() {
     let cli = Cli::parse();
 match cli.command {
@@ -364,6 +388,16 @@ match cli.command {
         }
         Commands::Drop { tool_ver } => {
             if let Err(e) = crow_drop(tool_ver) {
+                eprintln!("🐦‍⬛ Error: {}", e);
+            }
+        }
+        Commands::Field { tool_ver } => {
+            if let Err(e) = crow_field(tool_ver) {
+                eprintln!("🐦‍⬛ Error: {}", e);
+            }
+        }
+        Commands::Refresh => {
+            if let Err(e) = hook() {
                 eprintln!("🐦‍⬛ Error: {}", e);
             }
         }
