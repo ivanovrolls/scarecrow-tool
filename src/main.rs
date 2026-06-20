@@ -5,15 +5,9 @@ use clap::{Parser, Subcommand};
 use flate2::read::GzDecoder;
 use reqwest;
 use tar::Archive;
+use serde::{Deserialize};
 
-#[derive(Parser)] //automatically generate code to parse command line arguments, Rust writes boilerplate for me :p
-#[command(name = "crow")]
-#[command(about = "scarecrow is a CLI tool for managing development environments 🐦‍⬛", long_about = None)]
-struct Cli { //defines my command line interface, the struct will hold the parsed arguments
-    #[command(subcommand)]
-    command: Commands,
-}
-
+//structs
 #[derive(Subcommand)] //automatically generate code to parse subcommands
 enum Commands {
     Fetch { //install and switch to env
@@ -25,17 +19,56 @@ enum Commands {
     Drop { //remove env
         tool_ver: String, //ver of tool to remove e.g. node 18.16.0
     },
-    All, //list all envs
+    ListAll, //list all envs
 }
 
+#[derive(Parser)] //automatically generate code to parse command line arguments, Rust writes boilerplate for me :p
+#[command(name = "crow")]
+#[command(about = "scarecrow is a CLI tool for managing development environments 🐦‍⬛", long_about = None)]
+struct Cli { //defines my command line interface, the struct will hold the parsed arguments
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Deserialize)]
+struct Release {
+    assets: Vec<Asset>,
+}
+
+#[derive(Deserialize)]
+struct Asset {
+    name: String,
+    browser_download_url: String,
+}
+
+
 //helpers
+fn build_py (ver: &str, os: &str, arch: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let client = reqwest::blocking::Client::new();
+    let release: Release = client
+        .get("https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest")
+        .header("User-Agent", "scarecrow")
+        .send()?
+        .json()?;  // serde automatically deserializes the JSON into Release
+
+    let asset = release.assets.iter().find(|a| {
+        a.name.contains(ver) &&
+        a.name.contains(os) &&
+        a.name.contains(arch) &&
+        a.name.contains("install_only")
+    }).ok_or("No matching Python version found")?;
+
+    Ok(asset.browser_download_url.clone())
+}
+
 fn build_url(tool: &str, version: &str, os: &str, arch: &str) -> Result<String, Box<dyn std::error::Error>> {
     let os_mapped = map_os(tool, os);
     let arch_mapped = map_arch(tool, arch);
     
     match tool {
-        "node" => Ok(format!("https://nodejs.org/dist/v{}/node-v{}-{}-{}.tar.gz", version, version, os_mapped, arch_mapped)),
-        "go" => Ok(format!("https://go.dev/dl/go{}.{}-{}.tar.gz", version, os_mapped, arch_mapped)),
+        "node" => Ok(format!("https://nodejs.org/dist/v{}/node-v{}-{}-{}.tar.gz", &version, version, &os_mapped, &arch_mapped)),
+        "go" => Ok(format!("https://go.dev/dl/go{}.{}-{}.tar.gz", &version, &os_mapped, &arch_mapped)),
+        "python" => build_py(&version, &os_mapped, &arch_mapped),
         _ => Err("Unsupported tool".into())
     }
 }
@@ -44,13 +77,20 @@ fn map_os(tool: &str, os: &str) -> &'static str {
     match tool {
         "node" => match os {
             "macos" => "darwin",
-            "windows" => "win",
             "linux" => "linux",
+            "windows" => "win",
             _ => "unknown",
         },
         "go" => match os {
             "macos" => "darwin",
             "linux" => "linux",
+            "windows" => "win",
+            _ => "unknown",
+        },
+        "python" => match os {
+            "macos" => "darwin",
+            "linux" => "linux",
+            "windows" => "windows",
             _ => "unknown",
         },
         _ => "unknown",
@@ -58,6 +98,7 @@ fn map_os(tool: &str, os: &str) -> &'static str {
 }
 
 fn map_arch(tool: &str, arch: &str) -> &'static str {
+    //Python link example:https://www.python.org/ftp/python/3.14.6/Python-3.14.6.tgz
     match tool {
         "node" => match arch {
             "aarch64" => "arm64",
@@ -69,30 +110,42 @@ fn map_arch(tool: &str, arch: &str) -> &'static str {
             "x86_64" => "amd64",
             _ => "unknown",
         },
+        "python" => match arch {
+            "aarch64" => "aarch64",
+            "x86_64" => "x86_64",
+            _ => "unknown",
+        },
         _ => "unknown",
     }
 }
+
 fn symlink(tool : &str, version : &str, os: &str, arch: &str) -> Result<(), Box<dyn std::error::Error>> {
-    //creating symlink directory, for the tool the user is using scarecrow to install
     let os_mapped = map_os(tool, os);
     let arch_mapped = map_arch(tool, arch);
     let symlink_dir = format!("{}/.scarecrow/bin", std::env::var("HOME")?);
-    fs::create_dir_all(&symlink_dir)?; //only created if path does not exist
+    fs::create_dir_all(&symlink_dir)?;
 
-    let symlink_path = Path::new(&symlink_dir).join(tool); //where the symlink file will be
+    let symlink_name = match tool {
+        "python" => "python3",
+        _ => tool,
+    };
+
+    let symlink_path = Path::new(&symlink_dir).join(symlink_name);
     let target = match tool {
         "go" => format!("../versions/{}/{}/go/bin/{}", tool, version, tool),
+        "python" => format!("../versions/{}/{}/python/bin/python3", tool, version),
         _ => format!("../versions/{}/{}/{}-v{}-{}-{}/bin/{}", tool, version, tool, version, os_mapped, arch_mapped, tool),
-    };  
-    if symlink_path.exists() { //remove old symlinks
+    };
+
+    if symlink_path.exists() {
         fs::remove_file(&symlink_path)?;
     }
 
-    unix_fs::symlink(&target, &symlink_path)?; //create the symlink
+    unix_fs::symlink(&target, &symlink_path)?;
     Ok(())
 }
 
-fn download(tar_url: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+fn download(tar_url: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> { //function that downloads tarballs
     let client = reqwest::blocking::Client::new();
     let res = client.get(tar_url)
         .send()?;
@@ -142,7 +195,11 @@ fn fetch(input : String) -> Result<(), Box<dyn std::error::Error>> {
     
     let tarball = build_url(tool, ver, os, arch)?;
     let bytes = download(&tarball)?;
-    decomp_install(&bytes, &ver_dir.to_string_lossy(), "tar.gz")?;
+
+    if let Err(e) = decomp_install(&bytes, &ver_dir.to_string_lossy(), "tar.gz") {
+        fs::remove_dir_all(&ver_dir)?;
+        return Err(e);
+    }
 
     symlink(&tool, &ver, os, arch)?;
     println!("🐦‍⬛ Installed {} @ {}", tool, ver);
@@ -253,7 +310,7 @@ match cli.command {
                 eprintln!("🐦‍⬛ Error: {}", e);
             }
         }
-        Commands::All => {
+        Commands::ListAll => {
             if let Err(e) = list_all_ver() {
                 eprintln!("🐦‍⬛ Error: {}", e);
             }
