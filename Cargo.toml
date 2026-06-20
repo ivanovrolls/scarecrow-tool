@@ -1,3 +1,7 @@
+[[bin]]
+name = "crow"
+path = "src/main.rs"
+
 [package]
 name = "scarecrow-tool"
 version = "0.1.0"

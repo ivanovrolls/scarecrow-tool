@@ -1,4 +1,6 @@
 use std::fs;
+use std::fs::File;
+use std::io::{self, BufRead};
 use std::path::Path;
 use std::os::unix::fs as unix_fs;
 use clap::{Parser, Subcommand};
@@ -6,6 +8,21 @@ use flate2::read::GzDecoder;
 use reqwest;
 use tar::Archive;
 use serde::{Deserialize};
+use std::fs::OpenOptions;
+use std::io::Write;
+
+//bash for shell integration
+const SHELL_HOOK: &str = r#"
+#by scarecrow 🐦‍⬛
+export PATH="$HOME/.scarecrow/bin:$PATH"
+
+function cd() {
+    builtin cd "$@"
+    if [ -f .scarecrow ]; then
+        crow hook
+    fi
+}
+"#;
 
 //structs
 #[derive(Subcommand)] //automatically generate code to parse subcommands
@@ -20,6 +37,8 @@ enum Commands {
         tool_ver: String, //ver of tool to remove e.g. node 18.16.0
     },
     ListAll, //list all envs
+    Init, //shell integration hook
+    Hook,
 }
 
 #[derive(Parser)] //automatically generate code to parse command line arguments, Rust writes boilerplate for me :p
@@ -43,6 +62,12 @@ struct Asset {
 
 
 //helpers
+fn read_lines<P>(filename: P) -> io::Result<io::Lines<io::BufReader<File>>>
+where P: AsRef<Path>, {
+    let file = File::open(filename)?;
+    Ok(io::BufReader::new(file).lines())
+}
+
 fn build_py (ver: &str, os: &str, arch: &str) -> Result<String, Box<dyn std::error::Error>> {
     let client = reqwest::blocking::Client::new();
     let release: Release = client
@@ -291,6 +316,38 @@ fn list_all_ver() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn init() -> Result<(), Box<dyn std::error::Error>> { 
+    let shell = std::env::var("SHELL")?; //find user's shell
+    //println!("{}", shell);
+    let config_file = match shell.as_str() { //config file format dependant 
+        s if s.contains("zsh") => ".zshrc",
+        s if s.contains("bash") => ".bashrc",
+        _ => return Err("Unsupported shell".into()),
+    };
+    let config_path = format!("{}/{}", std::env::var("HOME")?, config_file);
+    let mut file = OpenOptions::new()
+        .append(true)
+        .open(&config_path)?;
+
+    writeln!(file, "{}", SHELL_HOOK)?;
+
+    println!("🐦‍⬛ Scarecrow initialised! Restart your terminal or run 'source ~/{}'", config_file);
+
+    Ok(())
+}
+
+fn hook() -> Result<(), Box<dyn std::error::Error>> { 
+    if fs::exists(".scarecrow")? {
+        if let Ok(lines) = read_lines(".scarecrow") {
+            // Consumes the iterator, returns an (Optional) String
+            for line in lines.map_while(Result::ok) {
+                perch(line)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn main() {
     let cli = Cli::parse();
 match cli.command {
@@ -312,6 +369,16 @@ match cli.command {
         }
         Commands::ListAll => {
             if let Err(e) = list_all_ver() {
+                eprintln!("🐦‍⬛ Error: {}", e);
+            }
+        }
+        Commands::Init => {
+            if let Err(e) = init() {
+                eprintln!("🐦‍⬛ Error: {}", e);
+            }
+        }
+        Commands::Hook => {
+            if let Err(e) = hook() {
                 eprintln!("🐦‍⬛ Error: {}", e);
             }
         }
