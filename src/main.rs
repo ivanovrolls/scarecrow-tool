@@ -266,6 +266,7 @@ fn crow_drop(input : String) -> Result<(), Box<dyn std::error::Error>> {
     if !fs::exists(&tool_ver_path)? {
         return Err("Version does not exist".into());
     }
+
     let is_active = fs::read_link(&symlink_path)
         .ok()
         .map(|target| target.to_string_lossy().contains(ver))
@@ -274,9 +275,19 @@ fn crow_drop(input : String) -> Result<(), Box<dyn std::error::Error>> {
         return Err("Cannot remove active version. Run 'crow perch' to switch to a different version first.".into());
     } else {
         fs::remove_dir_all(&tool_ver_path)?;
-        Ok(())
     }
 
+    if fs::exists(".scarecrow")? {
+        let vec_lines: Vec<String> = read_lines(".scarecrow")?
+            .map_while(Result::ok)
+            .filter(|line| line != &input)
+            .collect();
+        let mut file = File::create(".scarecrow")?;
+            for line in vec_lines {
+                writeln!(file, "{}", line)?;
+            }
+    }
+    Ok(())
 }
 
 fn crow_field(input: String) -> Result<(), Box<dyn std::error::Error>> {
